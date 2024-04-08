@@ -1,0 +1,10 @@
+config.h
+
+*.gcode
+*.bgcode
+
+*.FCBak
+
+*.kicad_sch-bak
+
+Coax Switch Controller/Coax Switch Controller-backups/

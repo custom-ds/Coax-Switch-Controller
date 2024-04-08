@@ -1,0 +1,33 @@
+%TF.GenerationSoftware,KiCad,Pcbnew,7.0.10*%
+%TF.CreationDate,2024-03-07T20:10:07-06:00*%
+%TF.ProjectId,Coax Switch Controller,436f6178-2053-4776-9974-636820436f6e,1.0*%
+%TF.SameCoordinates,Original*%
+%TF.FileFunction,NonPlated,1,2,NPTH,Drill*%
+%TF.FilePolarity,Positive*%
+%FSLAX46Y46*%
+G04 Gerber Fmt 4.6, Leading zero omitted, Abs format (unit mm)*
+G04 Created by KiCad (PCBNEW 7.0.10) date 2024-03-07 20:10:07*
+%MOMM*%
+%LPD*%
+G01*
+G04 APERTURE LIST*
+%TA.AperFunction,ComponentDrill*%
+%ADD10C,3.200000*%
+%TD*%
+G04 APERTURE END LIST*
+D10*
+%TO.C,H2*%
+X92384000Y-62670000D03*
+%TO.C,H4*%
+X92384000Y-137670000D03*
+%TO.C,J2*%
+X147538500Y-64790000D03*
+X158968500Y-64790000D03*
+%TO.C,J1*%
+X180256500Y-64790000D03*
+X191686500Y-64790000D03*
+%TO.C,H1*%
+X202384000Y-62670000D03*
+%TO.C,H3*%
+X202384000Y-137670000D03*
+M02*
