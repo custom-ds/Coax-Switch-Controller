@@ -11,15 +11,4 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);   //optional
 IPAddress secondaryDNS(8, 8, 4, 4); //optional
 
-
-const String pageTitle = "PowerCenter Shack Control";
-
-// Define the labels for the 5 relays
-char *relayDescriptions[] = {
-    "Coax Switch", 
-    "Antenna Tuner", 
-    "Antenna Rotor", 
-    "HF Amplifier", 
-    "HF Transceiver"
-};
 #endif

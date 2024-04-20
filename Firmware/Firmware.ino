@@ -43,7 +43,10 @@ const char* password = "";
 
 
 //Global Variables
+SerLCD lcd; // Initialize the library with default I2C address 0x72
 TWIST twist;
+
+
 Preferences prefs;
 AsyncWebServer server(80);
 
@@ -51,20 +54,24 @@ int radio1 = 0;
 int radio2 = 1;
 int radioSelected = 0;
 
+const String pageTitle = "Coax Controller";
+
+// Define the labels for the 6 antennas + Disconnect
+String coaxDescriptions[] = {"Disconnect   ", "Antenna 1    ", "Antenna 2    ", "Antenna 3    ", "Antenna 4    ", "Antenna 5    ", "Antenna 6    "};
 
 
-
-
-// hw_timer_t *timer0 = NULL;
-// void IRAM_ATTR onTimer0();
 
 //Function Prototypes
 void updateLCD();
 void updateAntenna(int radio, int diff);
 void connectAntenna(int radio, int antenna, bool incrOnCollision);
 String getOrCreateAPIKey(bool force);
+void configureLCD(int r, int g, int b, int contrast);
+void configureTwist(int r, int g, int b);
 int getRandom(int max);
 bool checkAPIKey(String key);
+void saveAntennaName(int antenna, String name);
+void loadAntennas();
 
 void notFound(AsyncWebServerRequest *request);
 String getWebpage();
@@ -76,7 +83,6 @@ String getWebpage();
 
 /******************************************************************************************/
 void setup(void) {
-  Wire.begin();
   Serial.begin(115200);
 
 
@@ -116,14 +122,11 @@ void setup(void) {
 
 
   //Send the reset command to the display - this forces the cursor to return to the beginning of the display
-  Wire.beginTransmission(DISPLAY_ADDRESS1);
-  Wire.write('|'); //Put LCD into setting mode
-  Wire.write('-'); //Send clear display command
-  Wire.endTransmission();
+  Wire.begin();
+  lcd.begin(Wire); //Set up the LCD for I2C communication
 
-  Wire.beginTransmission(DISPLAY_ADDRESS1);
-  Wire.print("  2x6 Antenna       Selector");
-  Wire.endTransmission();
+  lcd.clear(); //Clear the display - this moves the cursor to home position as well
+  lcd.print("  2x6 Antenna       Selector");
 
 
   Serial.println("Starting Wifi");
@@ -160,6 +163,9 @@ void setup(void) {
   Serial.println(WiFi.localIP());
 
 
+  //Load the antenna names from eeprom
+  loadAntennas();
+
   //default the relays to whatever is currently set (from eeprom)
   connectAntenna(1, radio1, true);
   connectAntenna(2, radio2, true);
@@ -195,8 +201,109 @@ void setup(void) {
     }
   });
 
+  // Server Route Handler: /api/{key}/set/knob/rgb/{r}/{g}/{b}
+  server.on("^\\/api\\/([A-Z0-9]+)\\/set\\/knob\\/rgb\\/([0-9]+)\\/([0-9]+)\\/([0-9]+)$", HTTP_POST, [] (AsyncWebServerRequest *request) {
+    String apiKey = request->pathArg(0);
+    String tmp = request->pathArg(1);
+    int r = tmp.toInt();
+    tmp = request->pathArg(2);
+    int g = tmp.toInt();
+    tmp = request->pathArg(3);
+    int b = tmp.toInt();
+
+    //Check the API key
+    if (!checkAPIKey(apiKey)) {
+      request->send(400, "text/plain", "API Request Denied. Valid key?");
+      return;
+    } 
+
+    if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+      configureTwist(r, g, b);
+      request->send(200, "text/plain", "Twist Knob configured");
+    } else {
+      request->send(400, "text/plain", "Invalid RGB values");
+    }
+
+  });
+
+  // Server Route Handler: /api/{key}/set/lcd/rgb/{r}/{g}/{b}/{contrast}
+  server.on("^\\/api\\/([A-Z0-9]+)\\/set\\/lcd\\/rgb\\/([0-9]+)\\/([0-9]+)\\/([0-9]+)\\/([0-9]+)$", HTTP_POST, [] (AsyncWebServerRequest *request) {
+    String apiKey = request->pathArg(0);
+    String tmp = request->pathArg(1);
+    int r = tmp.toInt();
+    tmp = request->pathArg(2);
+    int g = tmp.toInt();
+    tmp = request->pathArg(3);
+    int b = tmp.toInt();
+    tmp = request->pathArg(4);
+    int contrast = tmp.toInt();
+
+    //Check the API key
+    if (!checkAPIKey(apiKey)) {
+      request->send(400, "text/plain", "API Request Denied. Valid key?");
+      return;
+    } 
+
+    if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255 && contrast >= 0 && contrast <= 255) {
+      configureLCD(r, g, b, contrast);
+      request->send(200, "text/plain", "LCD configured");
+    } else {
+      request->send(400, "text/plain", "Invalid RGB values");
+    }
+
+  });
 
 
+  // Server Route Handler: /api/{key}/set/antenna/{antenna}/{name}
+  server.on("^\\/api\\/([A-Z0-9]+)\\/set\\/antenna\\/([0-9]+)\\/(.+)$", HTTP_POST, [] (AsyncWebServerRequest *request) {
+    String apiKey = request->pathArg(0);
+    String antenna = request->pathArg(1);
+    String name = request->pathArg(2);
+
+    int antennaID = antenna.toInt();
+
+    //Check the API key
+    if (!checkAPIKey(apiKey)) {
+      request->send(400, "text/plain", "API Request Denied. Valid key?");
+      return;
+    }
+
+    //limit the antenna name to 13 characters
+    if (name.length() > 13) {
+      name = name.substring(0, 13);
+    }
+
+    if (antennaID >= 0 && antennaID <= 6) {
+      saveAntennaName(antennaID, name);
+      loadAntennas();   //populate the array of antenna names
+      updateLCD();    //update the LCD display with the new name
+      request->send(200, "text/plain", "Antenna " + antenna + " name saved");
+    } else {
+      request->send(400, "text/plain", "Invalid antenna number");
+    }
+
+  });
+
+  // Server Route Handler: /api/{key}/get/antenna/{antenna}
+  server.on("^\\/api\\/([A-Z0-9]+)\\/get\\/antenna\\/([0-9]+)$", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String apiKey = request->pathArg(0);
+    String antenna = request->pathArg(1);
+
+    int antennaID = antenna.toInt();
+
+    //Check the API key
+    if (!checkAPIKey(apiKey)) {
+      request->send(400, "text/plain", "API Request Denied. Valid key?");
+      return;
+    }
+
+    if (antennaID >= 0 && antennaID <= 6) {
+      request->send(200, "text/plain", coaxDescriptions[antennaID]);
+    } else {
+      request->send(400, "text/plain", "Invalid antenna number");
+    }
+
+  });
 
 
   // Server Route Handler: Not Found
@@ -240,26 +347,22 @@ void loop(void) {
 void updateLCD() {
   // Shows the currently selected antennas that are set up.
 
-  Wire.beginTransmission(DISPLAY_ADDRESS1);
-  Wire.write('|'); //Put LCD into setting mode
-  Wire.write('-'); //Send clear display command
-  Wire.endTransmission();
-
-  Wire.beginTransmission(DISPLAY_ADDRESS1);
+  lcd.clear(); //Clear the display - this moves the cursor to home position as well
+  
   if (radioSelected == 1) {
-    Wire.print("1>>");
+    lcd.print("1>>");
   } else {
-    Wire.print("1: ");
+    lcd.print("1: ");
   }
-  Wire.print(coaxDescriptions[radio1]);
+  lcd.print(coaxDescriptions[radio1]);
 
   if (radioSelected == 2) {
-    Wire.print("2>>");
+    lcd.print("2>>");
   } else {
-    Wire.print("2: ");
+    lcd.print("2: ");
   }
-  Wire.print(coaxDescriptions[radio2]);
-  Wire.endTransmission();
+  lcd.print(coaxDescriptions[radio2]);
+  
 }
 /******************************************************************************************/
 void updateAntenna(int radio, int diff) {
@@ -532,6 +635,75 @@ bool checkAPIKey(String key) {
 
   return false;
 }
+/******************************************************************************************/
+void configureLCD(int r, int g, int b, int contrast) {
+  //Configure the LCD display
+
+ 
+  lcd.setBacklight(r, g, b); //colors from the pararmeters
+  lcd.setContrast(contrast); //contrast from the parameter
+
+  lcd.disableSplash(); //Disable the boot-time splash screen
+
+  // lcd.clear(); //Clear the display - this moves the cursor to home position as well
+  // lcd.print("W0ZC Coax Controller!");
+  // lcd.saveSplash(); //Save this current text as the splash screen at next power on
+  // lcd.enableSplash(); //This will cause the splash to be displayed at power on
+}
+/******************************************************************************************/
+void configureTwist(int r, int g, int b) {
+  //Configure the Twist Knob
+
+  twist.setColor(r, g, b); //colors from the pararmeters
+}
+/******************************************************************************************/
+void saveAntennaName(int antenna, String name) {
+  //Save the name of the antenna to eeprom
+
+  //limit the antenna name to 13 characters
+  if (name.length() > 13) {
+    name = name.substring(0, 13);
+  }
+  
+  //pad the name up to 13 characters if it's less
+  while (name.length() < 13) {
+    name += " ";
+  }
+
+  int szLen = name.length() + 1;
+  char szName[szLen];	
+	name.toCharArray(szName, szLen);
+
+  String key = "ant" + String(antenna);
+  szLen = key.length() + 1;
+  char szKey[szLen];
+  key.toCharArray(szKey, szLen);
+
+  prefs.putString(szKey, szName);
+}
+/******************************************************************************************/
+void loadAntennas() {
+  //Load the antenna names from eeprom
+
+  // pull the descriptions from eeprom
+  coaxDescriptions[1] = prefs.getString("ant1", "");
+  coaxDescriptions[2] = prefs.getString("ant2", "");
+  coaxDescriptions[3] = prefs.getString("ant3", "");
+  coaxDescriptions[4] = prefs.getString("ant4", "");
+  coaxDescriptions[5] = prefs.getString("ant5", "");
+  coaxDescriptions[6] = prefs.getString("ant6", "");
+
+  //Check for invalid settings - reset to default
+  if (coaxDescriptions[0].length() != 13) coaxDescriptions[0] = "Disconnect   ";
+  if (coaxDescriptions[1].length() != 13) coaxDescriptions[1] = "Antenna 1    ";
+  if (coaxDescriptions[2].length() != 13) coaxDescriptions[2] = "Antenna 2    ";
+  if (coaxDescriptions[3].length() != 13) coaxDescriptions[3] = "Antenna 3    ";
+  if (coaxDescriptions[4].length() != 13) coaxDescriptions[4] = "Antenna 4    ";
+  if (coaxDescriptions[5].length() != 13) coaxDescriptions[5] = "Antenna 5    ";
+  if (coaxDescriptions[6].length() != 13) coaxDescriptions[6] = "Antenna 6    ";
+
+}
+/******************************************************************************************/
 /******************************************************************************************/
 void notFound(AsyncWebServerRequest *request) {
     request->send(404, "text/plain", "Not found");
