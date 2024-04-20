@@ -1,4 +1,6 @@
 config.h
+test_config.html
+test_interface.html
 
 *.gcode
 *.bgcode

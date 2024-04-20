@@ -74,7 +74,12 @@ void saveAntennaName(int antenna, String name);
 void loadAntennas();
 
 void notFound(AsyncWebServerRequest *request);
-String getWebpage();
+String getHeader();
+String getFooter();
+String getPageInterface();
+String getPageConfiguration();
+String getJavascript();
+String getCSS();
 
 
 
@@ -179,10 +184,7 @@ void setup(void) {
 
   // ******* Server Route Handlers *******
 
-  // Server Route Handler: /
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/html", getWebpage());
-  });
+
 
   // Server Route Handler: /api/{key}/connect/{radio}/{antenna}
   server.on("^\\/api\\/([A-Z0-9]+)\\/connect\\/([0-9])\\/([0-9])$", HTTP_POST, [] (AsyncWebServerRequest *request) {
@@ -305,6 +307,27 @@ void setup(void) {
 
   });
 
+
+  // Server Route Handler: /
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", getPageInterface());
+  });
+
+  // Server Route Handler: /config
+  server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", getPageConfiguration());
+  });
+
+  // Server Route Handler: /main.js
+  server.on("/main.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/javascript", getJavascript());
+  });
+
+  // Server Route Handler: /main.css
+  server.on("/main.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/css", getCSS());
+  });
+  
 
   // Server Route Handler: Not Found
   server.onNotFound(notFound);
@@ -708,109 +731,304 @@ void loadAntennas() {
 void notFound(AsyncWebServerRequest *request) {
     request->send(404, "text/plain", "Not found");
 }
+
+
+
+
+
+
+
+/******************************************************************************************
+                    Views
+******************************************************************************************/
 /******************************************************************************************/
-String getWebpage() {
+String getHeader() {
 
   String html = R"(<!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
-  <title>%TITLE%</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>W0ZC Coax Selector</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
+    <link rel="stylesheet" href="/main.css">   
+
+    
 </head>
-
 <body>
-  <h1>%TITLE%</h1>
+    <header class="bg-primary text-white py-3">
+        <div class="container d-flex justify-content-between align-items-center">
+            <h1 class="mb-0">Your Device Dashboard</h1>
+            <button class="btn btn-light" id="logoutButton">Logout</button>
+        </div>
+    </header>
 
-  <form id='relayForm'>
-    <label for='systemon'>System On:</label>
-    <button type='button' id='systemon' onclick='toggleSystem(true)'>System On</button><br>    
+)"; 
   
-    <label for='systemoff'>System Off:</label>
-    <button type='button' id='systemoff' onclick='toggleSystem(false)'>System Off</button><br>  
+    return html;
+  }
+/******************************************************************************************/
+String getFooter() {
 
-    <label for='relay1'>Relay 1 :: %RELAY1DESC%</label>
-    <button type='button' id='relay1' onclick='toggleRelay(1)'>Toggle</button><br>
+  String html = R"(
+<footer class="bg-dark text-white py-3">
+        <div class="container">
+            <p class="mb-0">W0ZC Coax Selector</br /><a href="http://www.w0zc.com/" target="_blank">W0ZC.com</a></p>
+        </div>
+    </footer>
 
-    <label for='relay2'>Relay 2 :: %RELAY2DESC%</label>
-    <button type='button' id='relay2' onclick='toggleRelay(2)'>Toggle</button><br>
-
-    <label for='relay3'>Relay 3 :: %RELAY3DESC%</label>
-    <button type='button' id='relay3' onclick='toggleRelay(3)'>Toggle</button><br>
-
-    <label for='relay4'>Relay 4 :: %RELAY4DESC%</label>
-    <button type='button' id='relay4' onclick='toggleRelay(4)'>Toggle</button><br>
-
-    <label for='relay5'>Relay 5 :: %RELAY5DESC%</label>
-    <button type='button' id='relay5' onclick='toggleRelay(5)'>Toggle</button><br>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/main.js"></script>
 
 
-  </form>
-
-  <script>
-    async function toggleRelay(relayNumber) {
-      try {
-        var uri = '/api/relay/toggle?relay=' + relayNumber.toString();
-        console.log(uri);
-
-        const response = await fetch(uri, {
-          method: 'POST'
-        });
-
-        if (response.ok) {
-          const result = await response.text();
-          //alert(result); // Display the result (e.g., Relay 1 is ON/OFF)
-        } else {
-          alert('Error toggling relay');
-        }
-      } catch (error) {
-        console.error(error);
-        alert('An error occurred');
-      }
-    }
-
-    async function toggleSystem(systemOn) {
-      try {
-        var uri ='';
-        if (systemOn) {
-          uri = '/api/relay/system/on';
-        } else {
-          uri = '/api/relay/system/off';
-        }
-      
-        console.log(uri);
-
-        const response = await fetch(uri, {
-          method: 'POST'
-        });
-
-        if (response.ok) {
-          const result = await response.text();
-          //alert(result); // Display the result (e.g., Relay 1 is ON/OFF)
-        } else {
-          alert('Error toggling relay');
-        }
-      } catch (error) {
-        console.error(error);
-        alert('An error occurred');
-      }
-    }
-
-  </script>
+    
 </body>
+</html>    
+    
 
-</html>
+
+  )"; 
+
+  return html;
+}
+/******************************************************************************************/
+String getPageInterface() {
+
+  String html = R"(
+Foo Bar
 )"; 
 
-  // Replace placeholders with actual values
-  html.replace("%TITLE%", "Antenna Switch");//"pageTitle");
-  html.replace("%RELAY1DESC%", "relayDescriptions[0]");
-  html.replace("%RELAY2DESC%", "relayDescriptions[1]");
-  html.replace("%RELAY3DESC%", "relayDescriptions[2]");
-  html.replace("%RELAY4DESC%", "relayDescriptions[3]");
-  html.replace("%RELAY5DESC%", "relayDescriptions[4]");
+
+  //Replace placeholders with actual values
+  html.replace("%ANT1%", coaxDescriptions[1]);
+  html.replace("%ANT2%", coaxDescriptions[2]);
+  html.replace("%ANT3%", coaxDescriptions[3]);
+  html.replace("%ANT4%", coaxDescriptions[4]);
+  html.replace("%ANT5%", coaxDescriptions[5]);
+  html.replace("%ANT6%", coaxDescriptions[6]);
+
+  //Concat header, body, and footer
+  String header = getHeader();
+  String footer = getFooter();
+  html = header + html + footer;
 
   return html;
 
 
+
+}
+/******************************************************************************************/
+String getPageConfiguration() {
+
+  String html = R"(
+<main class="container mt-4">
+        <form>
+            <h3>Antenna Labels</h3>
+            <div class="form-group">
+                <label for="antenna1">Antenna 1:</label>
+                <input type="text" class="form-control" id="antenna1" name="antenna1" maxlength="13" value="%ANT1%">
+            </div>
+            <div class="form-group">
+                <label for="antenna2">Antenna 2:</label>
+                <input type="text" class="form-control" id="antenna2" name="antenna2" maxlength="13" value="%ANT2%">
+            </div>
+            <div class="form-group">
+                <label for="antenna3">Antenna 3:</label>
+                <input type="text" class="form-control" id="antenna3" name="antenna3" maxlength="13" value="%ANT3%">
+            </div>
+            <div class="form-group">
+                <label for="antenna4">Antenna 4:</label>
+                <input type="text" class="form-control" id="antenna4" name="antenna4" maxlength="13" value="%ANT4%">
+            </div>
+            <div class="form-group">
+                <label for="antenna5">Antenna 5:</label>
+                <input type="text" class="form-control" id="antenna5" name="antenna5" maxlength="13" value="%ANT5%">
+            </div>
+            <div class="form-group">
+                <label for="antenna6">Antenna 6:</label>
+                <input type="text" class="form-control" id="antenna6" name="antenna6" maxlength="13" value="%ANT6%">
+            </div>
+            
+            <div class="form-group">
+                <button type="button" class="btn btn-primary" onclick="saveAntennaNames();">Save Antennas</button>
+            </div>                
+        </form>
+
+        
+        <form>
+            <h3>Front Panel Configuration</h3>
+            <h4>LCD Display</h4>
+
+            <div class="form-group">
+                <label for="lcdRed">Red:</label>
+                <input type="range" class="form-range" id="lcdRed" min="0" max="255" step="1" value="50">
+            </div>
+            <div class="form-group">
+                <label for="lcdGreen">Green:</label>
+                <input type="range" class="form-range" id="lcdGreen" min="0" max="255" step="1" value="50">
+            </div>
+            <div class="form-group">
+                <label for="lcdBlue">Blue:</label>
+                <input type="range" class="form-range" id="lcdBlue" min="0" max="255" step="1" value="50">
+            </div>
+            <div class="form-group">
+                <label for="lcdContrast">LCD Contrast (lower value is more contrast):</label>
+                <input type="range" class="form-range" id="lcdContrast" min="0" max="100" step="1" value="50">
+            </div>
+
+
+            <h4>Knob Color</h4>
+            <div class="form-group">
+                <label for="knobRed">Red:</label>
+                <input type="range" class="form-range" id="knobRed" min="0" max="255" step="1" value="50">
+            </div>
+            <div class="form-group">
+                <label for="knobGreen">Green:</label>
+                <input type="range" class="form-range" id="knobGreen" min="0" max="255" step="1" value="50">
+            </div>
+            <div class="form-group">
+                <label for="knobBlue">Blue:</label>
+                <input type="range" class="form-range" id="knobBlue" min="0" max="255" step="1" value="50">
+            </div>
+
+
+            <div class="form-group">
+                <button type="button" class="btn btn-primary" onclick="saveColors();">Save Colors</button>
+            </div> 
+        </form>
+    </main>    
+  
+  )";
+
+
+  //Replace placeholders with actual values
+  html.replace("%ANT1%", coaxDescriptions[1]);
+  html.replace("%ANT2%", coaxDescriptions[2]);
+  html.replace("%ANT3%", coaxDescriptions[3]);
+  html.replace("%ANT4%", coaxDescriptions[4]);
+  html.replace("%ANT5%", coaxDescriptions[5]);
+  html.replace("%ANT6%", coaxDescriptions[6]);
+
+  //Concat header, body, and footer
+  String header = getHeader();
+  String footer = getFooter();
+  html = header + html + footer;
+
+  return html;
+
+
+}
+/******************************************************************************************/
+String getJavascript() {
+
+  String html = R"(
+
+document.getElementById('logoutButton').addEventListener('click', function () {
+    // Implement logout functionality
+    alert('Logged out successfully!');
+});
+
+var apiKey = '6AMCEF3K7P6SAK';
+
+function saveAntennaNames() {
+    setAntennaName(1, document.getElementById('antenna1').value);
+    setAntennaName(2, document.getElementById('antenna2').value);
+    setAntennaName(3, document.getElementById('antenna3').value);
+    setAntennaName(4, document.getElementById('antenna4').value);
+    setAntennaName(5, document.getElementById('antenna5').value);
+    setAntennaName(6, document.getElementById('antenna6').value);
+}
+
+async function setAntennaName(ant, name) {
+try {
+    var uri = '/api/' + apiKey + '/set/antenna/' + ant.toString() + '/' + name;
+    console.log(uri);
+
+    const response = await fetch(uri, {
+        method: 'POST'
+    });
+
+    if (response.ok) {
+        const result = await response.text();
+    } else {
+        alert('Error in API call.');
+    }
+
+} catch (error) {
+    console.error(error);
+    //alert('An error occurred');
+}
+}
+
+function saveColors() {
+    lcdRed = document.getElementById('lcdRed').value;
+    lcdGreen = document.getElementById('lcdGreen').value;
+    lcdBlue = document.getElementById('lcdBlue').value;
+    lcdContrast = document.getElementById('lcdContrast').value;
+
+    knobRed = document.getElementById('knobRed').value;
+    knobGreen = document.getElementById('knobGreen').value;
+    knobBlue = document.getElementById('knobBlue').value;
+
+    setColor('lcd', lcdRed, lcdGreen, lcdBlue, lcdContrast);
+    setColor('knob', knobRed, knobGreen, knobBlue, 0);
+    
+}
+
+async function setColor(destination, r, g, b, contrast) {
+    try {
+        
+
+        var uri = '/api/' + apiKey + '/set/' + destination + '/rgb/' + r.toString() + '/' + g.toString() + '/' + b.toString();
+        if (destination == 'lcd') {
+            uri += '/' + contrast.toString();
+        }
+        console.log(uri);
+
+        const response = await fetch(uri, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.text();
+        } else {
+            alert('Error in API call.');
+        }
+    } catch (error) {
+        console.error(error);
+        //alert('An error occurred');
+    }
+}
+
+
+
+
+  )";
+
+  return html;
+}
+/******************************************************************************************/
+String getCSS() {
+
+  String html = R"(
+
+body {
+    width: 80%;
+    height: 80%;
+    margin: auto;
+}
+#main {
+    height: 400px;
+}
+#color {
+    margin-left: 10%;
+    width: 50%;
+}
+  
+  )";
+
+  return html;
 
 }
