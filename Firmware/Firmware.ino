@@ -68,6 +68,7 @@ void connectAntenna(int radio, int antenna, bool incrOnCollision);
 String getOrCreateAPIKey(bool force);
 void configureLCD(int r, int g, int b, int contrast);
 void configureTwist(int r, int g, int b);
+String getTempAPIKey();
 int getRandom(int max);
 bool checkAPIKey(String key);
 void saveAntennaName(int antenna, String name);
@@ -307,6 +308,28 @@ void setup(void) {
 
   });
 
+  // Server Route Handler: /api/{key}/get/radio/{radioID}
+  server.on("^\\/api\\/([A-Z0-9]+)\\/get\\/radio\\/([0-9])$", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    String apiKey = request->pathArg(0);
+    String radio = request->pathArg(1);
+
+    int radioID = radio.toInt();
+
+    //Check the API key
+    if (!checkAPIKey(apiKey)) {
+      request->send(400, "text/plain", "API Request Denied. Valid key?");
+      return;
+    }
+
+    if (radioID == 1) {
+      request->send(200, "text/plain", String(radio1));
+    } else if (radioID == 2) {
+      request->send(200, "text/plain", String(radio2));
+    } else {
+      request->send(400, "text/plain", "Invalid radio number");
+    }
+
+  });
 
   // Server Route Handler: /
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -644,6 +667,15 @@ String getOrCreateAPIKey(bool force) {
   return key;
 }
 /******************************************************************************************/
+String getTempAPIKey() {
+  //gets a temporary API key for use in this session
+
+  String key = "";
+  key = prefs.getString("apikey", "");      //TODO: Want to switch this to a temporary key valid only for this session
+
+  return key;
+}
+/******************************************************************************************/
 int getRandom(int max) {
   return (esp_random() % max);
 }
@@ -663,6 +695,13 @@ void configureLCD(int r, int g, int b, int contrast) {
   //Configure the LCD display
 
  
+  //Store the settings in eeprom so we can display them in the configuration screens
+  prefs.putInt("lcdRed", r);
+  prefs.putInt("lcdGreen", g);
+  prefs.putInt("lcdBlue", b);
+  prefs.putInt("lcdContrast", contrast);
+
+
   lcd.setBacklight(r, g, b); //colors from the pararmeters
   lcd.setContrast(contrast); //contrast from the parameter
 
@@ -676,6 +715,11 @@ void configureLCD(int r, int g, int b, int contrast) {
 /******************************************************************************************/
 void configureTwist(int r, int g, int b) {
   //Configure the Twist Knob
+
+  //Store the settings in eeprom so we can display them in the configuration screens
+  prefs.putInt("knobRed", r);
+  prefs.putInt("knobGreen", g);
+  prefs.putInt("knobBlue", b);
 
   twist.setColor(r, g, b); //colors from the pararmeters
 }
@@ -760,8 +804,9 @@ String getHeader() {
 <body>
     <header class="bg-primary text-white py-3">
         <div class="container d-flex justify-content-between align-items-center">
-            <h1 class="mb-0">Your Device Dashboard</h1>
-            <button class="btn btn-light" id="logoutButton">Logout</button>
+            <h1 class="mb-0">W0ZC Coax Controller</h1>
+            <a class="btn btn-light" href="/config">Configuration</a>
+            <a class="btn btn-light" href="/">Control</a>
         </div>
     </header>
 
@@ -773,7 +818,7 @@ String getHeader() {
 String getFooter() {
 
   String html = R"(
-<footer class="bg-dark text-white py-3">
+<footer class="bg-dark text-white py-3 mt-5">
         <div class="container">
             <p class="mb-0">W0ZC Coax Selector</br /><a href="http://www.w0zc.com/" target="_blank">W0ZC.com</a></p>
         </div>
@@ -797,11 +842,40 @@ String getFooter() {
 String getPageInterface() {
 
   String html = R"(
-Foo Bar
-)"; 
+    <main class="container mt-4">
+        <form>
+            <h1>Connections</h1>
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h2 class="text-center">Radio 1</h2>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 1);" id="rad1ant1">%ANT1%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 2);" id="rad1ant2">%ANT2%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 3);" id="rad1ant3">%ANT3%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 4);" id="rad1ant4">%ANT4%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 5);" id="rad1ant5">%ANT5%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 6);" id="rad1ant6">%ANT6%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 0);" id="rad1ant0">%ANT0%</button>
+                    </div>
+                    <div class="col-md-6">
+                        <h2 class="text-center">Radio 2</h2>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 1);" id="rad2ant1">%ANT1%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 2);" id="rad2ant2">%ANT2%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 3);" id="rad2ant3">%ANT3%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 4);" id="rad2ant4">%ANT4%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 5);" id="rad2ant5">%ANT5%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 6);" id="rad2ant6">%ANT6%</button>
+                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 0);" id="rad2ant0">%ANT0%</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </main>
+  )"; 
 
 
   //Replace placeholders with actual values
+  html.replace("%ANT0%", coaxDescriptions[0]);
   html.replace("%ANT1%", coaxDescriptions[1]);
   html.replace("%ANT2%", coaxDescriptions[2]);
   html.replace("%ANT3%", coaxDescriptions[3]);
@@ -824,8 +898,11 @@ String getPageConfiguration() {
 
   String html = R"(
 <main class="container mt-4">
+  <div class="container">
+    <div class="row">
+        <div class="col-md-6">
         <form>
-            <h3>Antenna Labels</h3>
+            <h2>Antenna Labels</h2>
             <div class="form-group">
                 <label for="antenna1">Antenna 1:</label>
                 <input type="text" class="form-control" id="antenna1" name="antenna1" maxlength="13" value="%ANT1%">
@@ -852,52 +929,56 @@ String getPageConfiguration() {
             </div>
             
             <div class="form-group">
-                <button type="button" class="btn btn-primary" onclick="saveAntennaNames();">Save Antennas</button>
+                <button type="button" class="btn btn-primary w-100 mt-4" onclick="saveAntennaNames();">Save Antennas</button>
             </div>                
         </form>
-
+      </div>
+      <div class="col-md-6">
         
         <form>
-            <h3>Front Panel Configuration</h3>
+            <h2>Front Panel Configuration</h2>
             <h4>LCD Display</h4>
 
             <div class="form-group">
                 <label for="lcdRed">Red:</label>
-                <input type="range" class="form-range" id="lcdRed" min="0" max="255" step="1" value="50">
+                <input type="range" class="form-range" id="lcdRed" min="0" max="255" step="1" value="%LCDRED%">
             </div>
             <div class="form-group">
                 <label for="lcdGreen">Green:</label>
-                <input type="range" class="form-range" id="lcdGreen" min="0" max="255" step="1" value="50">
+                <input type="range" class="form-range" id="lcdGreen" min="0" max="255" step="1" value="%LCDGREEN%">
             </div>
             <div class="form-group">
                 <label for="lcdBlue">Blue:</label>
-                <input type="range" class="form-range" id="lcdBlue" min="0" max="255" step="1" value="50">
+                <input type="range" class="form-range" id="lcdBlue" min="0" max="255" step="1" value="%LCDBLUE%">
             </div>
             <div class="form-group">
                 <label for="lcdContrast">LCD Contrast (lower value is more contrast):</label>
-                <input type="range" class="form-range" id="lcdContrast" min="0" max="100" step="1" value="50">
+                <input type="range" class="form-range" id="lcdContrast" min="0" max="100" step="1" value="%LCDCONTRAST%">
             </div>
 
 
             <h4>Knob Color</h4>
             <div class="form-group">
                 <label for="knobRed">Red:</label>
-                <input type="range" class="form-range" id="knobRed" min="0" max="255" step="1" value="50">
+                <input type="range" class="form-range" id="knobRed" min="0" max="255" step="1" value="%KNOBRED%">
             </div>
             <div class="form-group">
                 <label for="knobGreen">Green:</label>
-                <input type="range" class="form-range" id="knobGreen" min="0" max="255" step="1" value="50">
+                <input type="range" class="form-range" id="knobGreen" min="0" max="255" step="1" value="%KNOBGREEN%">
             </div>
             <div class="form-group">
                 <label for="knobBlue">Blue:</label>
-                <input type="range" class="form-range" id="knobBlue" min="0" max="255" step="1" value="50">
+                <input type="range" class="form-range" id="knobBlue" min="0" max="255" step="1" value="%KNOBBLUE%">
             </div>
 
 
             <div class="form-group">
-                <button type="button" class="btn btn-primary" onclick="saveColors();">Save Colors</button>
+                <button type="button" class="btn btn-primary w-100 mt-4" onclick="saveColors();">Save Colors</button>
             </div> 
         </form>
+        </div>
+      </div>
+    </div>
     </main>    
   
   )";
@@ -910,6 +991,17 @@ String getPageConfiguration() {
   html.replace("%ANT4%", coaxDescriptions[4]);
   html.replace("%ANT5%", coaxDescriptions[5]);
   html.replace("%ANT6%", coaxDescriptions[6]);
+
+
+  html.replace("%LCDRED%", String(prefs.getInt("lcdRed")));
+  html.replace("%LCDGREEN%", String(prefs.getInt("lcdGreen")));
+  html.replace("%LCDBLUE%", String(prefs.getInt("lcdBlue")));
+  html.replace("%LCDCONTRAST%", String(prefs.getInt("lcdContrast")));
+
+  html.replace("%KNOBRED%", String(prefs.getInt("knobRed")));
+  html.replace("%KNOBGREEN%", String(prefs.getInt("knobGreen")));
+  html.replace("%KNOBBLUE%", String(prefs.getInt("knobBlue")));
+
 
   //Concat header, body, and footer
   String header = getHeader();
@@ -925,12 +1017,9 @@ String getJavascript() {
 
   String html = R"(
 
-document.getElementById('logoutButton').addEventListener('click', function () {
-    // Implement logout functionality
-    alert('Logged out successfully!');
-});
 
-var apiKey = '6AMCEF3K7P6SAK';
+
+var apiKey = "%APIKEY%";
 
 function saveAntennaNames() {
     setAntennaName(1, document.getElementById('antenna1').value);
@@ -1002,10 +1091,51 @@ async function setColor(destination, r, g, b, contrast) {
     }
 }
 
+async function connectAnt(radio, antenna) {
+    try {
+        
 
+        var uri = '/api/' + apiKey + '/connect/' + radio.toString() + '/' + antenna.toString();
+        console.log(uri);
 
+        const response = await fetch(uri, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.text();
+        } else {
+            alert('Error in API call.');
+        }
+    } catch (error) {
+        console.error(error);
+        //alert('An error occurred');
+    }
+}
+
+function callApiAndUpdateButton() {
+  // Replace with your actual API endpoint
+  var uri = '/api/' + apiKey + '/get/radio/1'
+  console.log(uri);
+
+  fetch(uri)
+  .then(response => response.json())
+  .then(data => {
+    const button = document.getElementById('rad2ant1');
+    //button.textContent = "Response: " + data.text();
+  })
+  .catch(error => {
+    console.error('Error fetching data:', error);
+  });
+}
+
+// Call the function every 3 seconds
+setInterval(callApiAndUpdateButton, 3000);
 
   )";
+
+
+  html.replace("%APIKEY%", getTempAPIKey());
 
   return html;
 }
