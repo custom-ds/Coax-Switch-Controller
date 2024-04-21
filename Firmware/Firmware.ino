@@ -39,8 +39,10 @@ const char* password = "";
 */
 
 //Defines
-#define DISPLAY_ADDRESS1 0x72 //This is the default address of the OpenLCD
+#define FIRMWARE_VERSION "1.0.0"
 
+#define DISPLAY_ADDRESS1 0x72 //This is the default address of the OpenLCD
+#define MAX_CONFIG_SCREENS 6
 
 //Global Variables
 SerLCD lcd; // Initialize the library with default I2C address 0x72
@@ -50,9 +52,12 @@ TWIST twist;
 Preferences prefs;
 AsyncWebServer server(80);
 
-int radio1 = 0;
-int radio2 = 1;
-int radioSelected = 0;
+int radio1 = 0;   //default both to disconnected
+int radio2 = 0;   //default both to disconnected
+int radioSelected = 1;
+
+int displayMode = 1;    //1 = normal operation, 2 = configuration mode
+int configScreen = 0;     //The current configuration screen being displayed
 
 const String pageTitle = "Coax Controller";
 
@@ -63,6 +68,7 @@ String coaxDescriptions[] = {"Disconnect   ", "Antenna 1    ", "Antenna 2    ", 
 
 //Function Prototypes
 void updateLCD();
+void updateConfigScreen(int diff);
 void updateAntenna(int radio, int diff);
 void connectAntenna(int radio, int antenna, bool incrOnCollision);
 String getOrCreateAPIKey(bool force);
@@ -114,16 +120,16 @@ void setup(void) {
 
   //Do some sanity checking on the antennas selected
   if (radio1 < 0 || radio2 < 0) {
-    radio1 = 1;
-    radio2 = 2;
+    radio1 = 0;
+    radio2 = 0;
   }
-  if (radio1 > 5 || radio2 > 5) {
-    radio1 = 1;
-    radio2 = 2;
+  if (radio1 > 6 || radio2 > 6) {
+    radio1 = 0;
+    radio2 = 0;
   }
-  if (radio1 == radio2) {
-    radio1 = 1;
-    radio2 = 2;
+  if (radio1 == radio2 && radio1 > 0) {
+    radio1 = 0;
+    radio2 = 0;
   }
 
 
@@ -369,46 +375,145 @@ void setup(void) {
 void loop(void) {
   
   int diff;
+  static int pressCount = 0;
+
+  if (twist.isPressed()) {
+    //Serial.println("isPressed!");
+    pressCount++;
+  }
 
   if (twist.isClicked()) {
     //the button was clicked
     Serial.println("Button Clicked");
+    
 
-    radioSelected++;
-    if (radioSelected > 2) {
-      radioSelected = 1;
+    if (pressCount < 5) {
+      //short press - toggle the selected radio
+
+      if (displayMode == 1) {
+        //we're showing the connected antennas - normal operation mode
+        if (radioSelected == 1) radioSelected = 2;
+        else radioSelected = 1;
+      } else {
+        //we were in configuration mode - toggle the display mode
+        displayMode = 1;
+      }
+    } else {
+      //Long press - go into configuration mode
+      displayMode = 2;
+      configScreen = 0;   //start at the first configuration screen
     }
+
+
+    pressCount = 0;     //reset the counter since we've released the button.
     updateLCD();
+
+
+
   }
   diff = twist.getDiff();
   if (diff != 0) {
-    updateAntenna(radioSelected, diff);
+    if (displayMode == 1) {
+      //we're in the normal operation mode - just update the selected antenna
+      updateAntenna(radioSelected, diff);
+    } else {
+      //we're in configuration mode - update the configuration screen
+      updateConfigScreen(diff);
+    }
+
+    
   }
   
 
-  delay(250);
+  delay(100);
 }
 
 /******************************************************************************************/
 void updateLCD() {
   // Shows the currently selected antennas that are set up.
 
-  lcd.clear(); //Clear the display - this moves the cursor to home position as well
-  
-  if (radioSelected == 1) {
-    lcd.print("1>>");
-  } else {
-    lcd.print("1: ");
-  }
-  lcd.print(coaxDescriptions[radio1]);
+  if (displayMode == 1) {
+    //we're displaying the currently selected antennas
 
-  if (radioSelected == 2) {
-    lcd.print("2>>");
-  } else {
-    lcd.print("2: ");
+    lcd.clear(); //Clear the display - this moves the cursor to home position as well
+    
+    if (radioSelected == 1) {
+      lcd.print("1>>");
+    } else {
+      lcd.print("1: ");
+    }
+    lcd.print(coaxDescriptions[radio1]);
+
+    if (radioSelected == 2) {
+      lcd.print("2>>");
+    } else {
+      lcd.print("2: ");
+    }
+    lcd.print(coaxDescriptions[radio2]);
+
   }
-  lcd.print(coaxDescriptions[radio2]);
+  if (displayMode == 2) {
+    //We're in the configuration mode - show the appropriate setting
+
+    lcd.clear();
+    switch (configScreen) {
+    case 0:
+      lcd.print("Firmware Version");
+      lcd.setCursor(0, 1);
+      lcd.print(FIRMWARE_VERSION);
+      break;
+    case 1:
+      lcd.print("API Key");
+      lcd.setCursor(0, 1);
+      lcd.print(getTempAPIKey());
+      break;
+    case 2:
+      lcd.print("Wifi SSID");
+      lcd.setCursor(0, 1);
+      lcd.print(WiFi.SSID());
+      break;
+    case 3:
+      lcd.print("IP Mode");
+      lcd.setCursor(0, 1);
+      if (useStaticIP) {
+        lcd.print("Static");
+      } else {
+        lcd.print("DHCP");
+      }
+      break;
+    case 4:
+      lcd.print("IP Address");
+      lcd.setCursor(0, 1);
+      lcd.print(WiFi.localIP().toString());
+      break;
+    case 5:
+      lcd.print("IP Mask");
+      lcd.setCursor(0, 1);
+      lcd.print(WiFi.subnetMask().toString());
+      break;
+    case 6:
+      lcd.print("Gateway");
+      lcd.setCursor(0, 1);
+      lcd.print(WiFi.gatewayIP().toString());
+      break;
+    }
+  }
+
   
+}
+/******************************************************************************************/
+void updateConfigScreen(int diff) {
+  
+  //set the max limits for how far we can scroll
+  if (diff > 3) diff = 3;
+  if (diff < -3) diff = -3;
+
+  configScreen += diff;
+  if (configScreen > MAX_CONFIG_SCREENS) configScreen = configScreen - (MAX_CONFIG_SCREENS + 1);
+  if (configScreen < 0) configScreen = configScreen + (MAX_CONFIG_SCREENS + 1);
+
+  updateLCD();
+
 }
 /******************************************************************************************/
 void updateAntenna(int radio, int diff) {
@@ -486,7 +591,6 @@ void connectAntenna(int radio, int antenna, bool incrOnCollision) {
   if (radio == 2) {
     radio2 = antenna;
   }
-  //TODO: Need to verify that the antenna being selected isn't already coupled to the other radio
 
   if (radio1 == radio2 && antenna > 0) {
     //we have a collision. Let both radios be in Discconect mode (0) though
@@ -1113,24 +1217,56 @@ async function connectAnt(radio, antenna) {
     }
 }
 
-function callApiAndUpdateButton() {
-  // Replace with your actual API endpoint
-  var uri = '/api/' + apiKey + '/get/radio/1'
+var refreshRadio = 1;
+
+async function tmrRefresh() {
+  try {
+  
+  
+  //alternate between the two radios
+  if (refreshRadio == 1) {
+    refreshRadio = 2;
+  } else {
+    refreshRadio = 1;
+  }
+
+  var uri = '/api/' + apiKey + '/get/radio/' + refreshRadio.toString();
   console.log(uri);
 
-  fetch(uri)
-  .then(response => response.json())
-  .then(data => {
-    const button = document.getElementById('rad2ant1');
-    //button.textContent = "Response: " + data.text();
-  })
-  .catch(error => {
-    console.error('Error fetching data:', error);
-  });
+        const response = await fetch(uri, {
+            method: 'GET'
+        });
+
+        if (response.ok) {
+            const antenna = await response.text();
+
+            console.log("Get Results: " + refreshRadio + " :: " + antenna);
+
+            //loop through all of the rad1ant buttons and set the class to btn-primary except for the one that is connected
+            for (var i = 0; i < 7; i++) {
+                var button = document.getElementById('rad' + refreshRadio.toString() + 'ant' + i);
+                if (i == antenna) {
+                    button.className = "btn btn-success w-100 mb-2";
+                } else {
+                    if (i == 0) {
+                        button.className = "btn btn-secondary w-100 mb-2";
+                    } else {
+                        button.className = "btn btn-primary w-100 mb-2";
+                    }
+                }
+            }            
+        } else {
+            alert('Error in API call.');
+        }
+
+
+  } catch (error) {
+    console.error(error);
+  }
 }
 
-// Call the function every 3 seconds
-setInterval(callApiAndUpdateButton, 3000);
+// Call the function every 1 seconds
+setInterval(tmrRefresh, 1000);
 
   )";
 

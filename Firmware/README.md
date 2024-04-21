@@ -1,6 +1,15 @@
 # Coax Switch Controller - Firmware
 The C firmware for the Sparkfun ESP32-based coax switch relay controller for amateur radio stations.
 
+
+## Hardware
+The W0ZC Coax Controller utilizes the "Sparkfun ESP32 Thing Plus C" as the main processor board and Wifi interface
+for the coax switch controller. In addition, the Sparkfun 16x2 SerLCD module (Qwiic) and the Sparkfun Qwiic Twist
+knob for interfacing.
+
+A custom PCB is used to provide high side switching to the two sets of 6 coax relays.
+
+
 ## Programming the ESP32 
 
 ### Setting up the Environment
