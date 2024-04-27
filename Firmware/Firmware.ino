@@ -39,7 +39,7 @@ const char* password = "";
 */
 
 //Defines
-#define FIRMWARE_VERSION "1.0.0"
+#define FIRMWARE_VERSION "1.0.1"
 
 #define DISPLAY_ADDRESS1 0x72 //This is the default address of the OpenLCD
 #define MAX_CONFIG_SCREENS 6
@@ -60,29 +60,32 @@ int displayMode = 1;    //1 = normal operation, 2 = configuration mode
 int configScreen = 0;     //The current configuration screen being displayed
 
 const String pageTitle = "Coax Controller";
+String sessionAPIKey = "";
 
 // Define the labels for the 6 antennas + Disconnect
-String coaxDescriptions[] = {"Disconnect   ", "Antenna 1    ", "Antenna 2    ", "Antenna 3    ", "Antenna 4    ", "Antenna 5    ", "Antenna 6    "};
+String coaxDescriptions[] = {"Disconnect", "Antenna 1", "Antenna 2", "Antenna 3", "Antenna 4", "Antenna 5", "Antenna 6"};
 
 
 
 //Function Prototypes
 void updateLCD();
+void showSplash();
 void updateConfigScreen(int diff);
 void updateAntenna(int radio, int diff);
 void connectAntenna(int radio, int antenna, bool incrOnCollision);
-String getOrCreateAPIKey(bool force);
+String getAPIKey(bool force);
 void configureLCD(int r, int g, int b, int contrast);
 void configureTwist(int r, int g, int b);
-String getTempAPIKey();
+String generateKey();
 int getRandom(int max);
 bool checkAPIKey(String key);
 void saveAntennaName(int antenna, String name);
+void factoryReset();
 void loadAntennas();
 
 void notFound(AsyncWebServerRequest *request);
 String getHeader();
-String getFooter();
+String getFooter(String javascript);
 String getPageInterface();
 String getPageConfiguration();
 String getJavascript();
@@ -136,10 +139,7 @@ void setup(void) {
   //Send the reset command to the display - this forces the cursor to return to the beginning of the display
   Wire.begin();
   lcd.begin(Wire); //Set up the LCD for I2C communication
-
-  lcd.clear(); //Clear the display - this moves the cursor to home position as well
-  lcd.print("  2x6 Antenna       Selector");
-
+  showSplash();
 
   Serial.println("Starting Wifi");
   WiFi.mode(WIFI_STA);
@@ -174,7 +174,6 @@ void setup(void) {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-
   //Load the antenna names from eeprom
   loadAntennas();
 
@@ -190,9 +189,6 @@ void setup(void) {
 
 
   // ******* Server Route Handlers *******
-
-
-
   // Server Route Handler: /api/{key}/connect/{radio}/{antenna}
   server.on("^\\/api\\/([A-Z0-9]+)\\/connect\\/([0-9])\\/([0-9])$", HTTP_POST, [] (AsyncWebServerRequest *request) {
     String apiKey = request->pathArg(0);
@@ -255,6 +251,7 @@ void setup(void) {
 
     if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255 && contrast >= 0 && contrast <= 255) {
       configureLCD(r, g, b, contrast);
+      updateLCD();    //return to whatever screen we were on.
       request->send(200, "text/plain", "LCD configured");
     } else {
       request->send(400, "text/plain", "Invalid RGB values");
@@ -331,6 +328,9 @@ void setup(void) {
       request->send(200, "text/plain", String(radio1));
     } else if (radioID == 2) {
       request->send(200, "text/plain", String(radio2));
+    } else if (radioID == 0) {
+      //return both radios separated by a :
+      request->send(200, "text/plain", String(radio1) + ":" + String(radio2));
     } else {
       request->send(400, "text/plain", "Invalid radio number");
     }
@@ -366,8 +366,11 @@ void setup(void) {
   server.begin();
   Serial.println("HTTP server started");
 
+ //Generate the temporary session API key - Note that this should happen after Wifi has been established.
+  sessionAPIKey = generateKey();  
+
   //Get the API key. Generate a new one if necessary
-  String apiKey = getOrCreateAPIKey(false);   //Don't force the creation of a new key if one already exists
+  String apiKey = getAPIKey(false);   //Don't force the creation of a new key if one already exists
   Serial.println("API Key: " + apiKey);
 
 }
@@ -384,8 +387,6 @@ void loop(void) {
 
   if (twist.isClicked()) {
     //the button was clicked
-    Serial.println("Button Clicked");
-    
 
     if (pressCount < 5) {
       //short press - toggle the selected radio
@@ -428,9 +429,22 @@ void loop(void) {
   delay(100);
 }
 
-/******************************************************************************************/
+
+
+
+
+
+
+
+
+/******************************************************************************************
+                    Functions
+******************************************************************************************/
 void updateLCD() {
-  // Shows the currently selected antennas that are set up.
+/* 
+Shows the currently selected antennas that are connected to the radios. If we're in configuration mode, it will show the
+appropriate configuration screen.
+*/
 
   if (displayMode == 1) {
     //we're displaying the currently selected antennas
@@ -443,6 +457,7 @@ void updateLCD() {
       lcd.print("1: ");
     }
     lcd.print(coaxDescriptions[radio1]);
+    lcd.setCursor(0, 1);    //move to second line
 
     if (radioSelected == 2) {
       lcd.print("2>>");
@@ -459,22 +474,22 @@ void updateLCD() {
     switch (configScreen) {
     case 0:
       lcd.print("Firmware Version");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 1);    //move to second line
       lcd.print(FIRMWARE_VERSION);
       break;
     case 1:
       lcd.print("API Key");
-      lcd.setCursor(0, 1);
-      lcd.print(getTempAPIKey());
+      lcd.setCursor(0, 1);    //move to second line
+      lcd.print(getAPIKey(false));
       break;
     case 2:
       lcd.print("Wifi SSID");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 1);    //move to second line
       lcd.print(WiFi.SSID());
       break;
     case 3:
       lcd.print("IP Mode");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 1);    //move to second line
       if (useStaticIP) {
         lcd.print("Static");
       } else {
@@ -483,17 +498,17 @@ void updateLCD() {
       break;
     case 4:
       lcd.print("IP Address");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 1);    //move to second line
       lcd.print(WiFi.localIP().toString());
       break;
     case 5:
       lcd.print("IP Mask");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 1);    //move to second line
       lcd.print(WiFi.subnetMask().toString());
       break;
     case 6:
       lcd.print("Gateway");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(0, 1);    //move to second line
       lcd.print(WiFi.gatewayIP().toString());
       break;
     }
@@ -502,8 +517,23 @@ void updateLCD() {
   
 }
 /******************************************************************************************/
+void showSplash() {
+/*
+Show the branded Splash screen. This is saved to the display's EEPROM so it will be displayed 
+at power on, and again during the boot process.
+*/
+  lcd.clear(); //Clear the display - this moves the cursor to home position as well
+  lcd.print("    W0ZC.com    ");
+  lcd.print("Coax Controller");
+
+
+}
+/******************************************************************************************/
 void updateConfigScreen(int diff) {
-  
+/*
+Updates the currently displayed configuration screen based on the twist from the multi-purpose knob. If the
+knob is twisted, the screen will change.
+*/ 
   //set the max limits for how far we can scroll
   if (diff > 3) diff = 3;
   if (diff < -3) diff = -3;
@@ -517,7 +547,10 @@ void updateConfigScreen(int diff) {
 }
 /******************************************************************************************/
 void updateAntenna(int radio, int diff) {
-
+/*
+Updates the antenna selection for the specified radio based on the twist from the multi-purpose knob. If 
+the antenna is already selected, it will move to the next
+*/
   //cap out the maximum clicks that can be made in a cycle
   if (diff > 3) diff=3;
   if (diff < -3) diff=-3;
@@ -533,8 +566,8 @@ void updateAntenna(int radio, int diff) {
       }
     }
 
-    //Check to see if Radio 2 already has this antenna selected
-    if (radio1 == radio2) {
+    //Check to see if Radio 2 already has this antenna selected (unless we're disconnecting)
+    if (radio1 == radio2 && radio1 > 0) {
       if (diff > 0) {
         //clicking up
         radio1++;
@@ -563,8 +596,8 @@ void updateAntenna(int radio, int diff) {
       }
     }
 
-    //Check to see if Radio 1 already has this antenna selected
-    if (radio1 == radio2) {
+    //Check to see if Radio 1 already has this antenna selected (unless we're disconnecting)
+    if (radio1 == radio2 && radio2 > 0) {
       if (diff > 0) {
         //clicking up
         radio2++;
@@ -584,6 +617,10 @@ void updateAntenna(int radio, int diff) {
 }
 /******************************************************************************************/
 void connectAntenna(int radio, int antenna, bool incrOnCollision) {
+/*
+Connect the 'antenna' to the 'radio'. If incrOnCollision is true, then the antenna will be incremented if
+there is a collision, otherwise it is decremented.
+*/
 
   if (radio == 1) {
     radio1 = antenna;
@@ -727,7 +764,14 @@ void connectAntenna(int radio, int antenna, bool incrOnCollision) {
 
 }
 /******************************************************************************************/
-String getOrCreateAPIKey(bool force) {
+String getAPIKey(bool force) {
+/* 
+Retrieves the API key from eeprom. If it doesn't exist, or if force is true, it will generate a new one. If a new
+one is generated, it will be saved to eeprom.
+
+*/
+
+
   //build an array of possible characters for the API key, exlucing look-alike characters
   char possibleChars[] = {'2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
 
@@ -761,36 +805,45 @@ String getOrCreateAPIKey(bool force) {
     return storedKey;
   }
 
-  String key = "";
-  for (int i = 0; i < 14; i++) {
-    key += possibleChars[getRandom(32)];
-  }
+  String key = generateKey();   //generate a new key
 
   prefs.putString("apikey", key);   //save the key to eeprom
 
   return key;
 }
 /******************************************************************************************/
-String getTempAPIKey() {
-  //gets a temporary API key for use in this session
+String generateKey() {
+/*
+Generates a new 14 character key to be used as an API key. The key is generated from the possibleChars array which
+excludes look-alike characters such as 0, O, 1, I, etc.
+
+*/
+  //build an array of possible characters for the API key, exlucing look-alike characters
+  char possibleChars[] = {'2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+
 
   String key = "";
-  key = prefs.getString("apikey", "");      //TODO: Want to switch this to a temporary key valid only for this session
-
+  for (int i = 0; i < 14; i++) {
+    key += possibleChars[getRandom(32)];
+  }
   return key;
 }
 /******************************************************************************************/
 int getRandom(int max) {
+/*
+Get a random number between 0 and max
+*/
   return (esp_random() % max);
 }
 /******************************************************************************************/
 bool checkAPIKey(String key) {
-  //Check the API key against the stored key from eeprom
-  String storedKey = prefs.getString("apikey", "");
-  if (key == storedKey) {
-    return true;
-  } 
-
+/* 
+Check the key argument against the short-term session API key (stored in RAM) and the 
+long-term API key stored in eeprom. If either match, return true. Otherwise, return false.
+*/
+  
+  if (key == sessionAPIKey) return true;    //The session key is good
+  if (key == getAPIKey(false)) return true;    //The long-term key is good
 
   return false;
 }
@@ -809,12 +862,12 @@ void configureLCD(int r, int g, int b, int contrast) {
   lcd.setBacklight(r, g, b); //colors from the pararmeters
   lcd.setContrast(contrast); //contrast from the parameter
 
-  lcd.disableSplash(); //Disable the boot-time splash screen
+  //lcd.disableSplash(); //Disable the boot-time splash screen
 
-  // lcd.clear(); //Clear the display - this moves the cursor to home position as well
-  // lcd.print("W0ZC Coax Controller!");
-  // lcd.saveSplash(); //Save this current text as the splash screen at next power on
-  // lcd.enableSplash(); //This will cause the splash to be displayed at power on
+  showSplash(); //Show the splash screen
+  lcd.saveSplash(); //Save this current text as the splash screen at next power on
+  lcd.enableSplash(); //This will cause the splash to be displayed at power on
+  lcd.clear();
 }
 /******************************************************************************************/
 void configureTwist(int r, int g, int b) {
@@ -836,11 +889,6 @@ void saveAntennaName(int antenna, String name) {
     name = name.substring(0, 13);
   }
   
-  //pad the name up to 13 characters if it's less
-  while (name.length() < 13) {
-    name += " ";
-  }
-
   int szLen = name.length() + 1;
   char szName[szLen];	
 	name.toCharArray(szName, szLen);
@@ -853,8 +901,45 @@ void saveAntennaName(int antenna, String name) {
   prefs.putString(szKey, szName);
 }
 /******************************************************************************************/
+void factoryReset() {
+/*
+Reset the device to factory defaults. This will clear all settings and restore the device to the default.
+*/
+
+  //Clear the eeprom
+  prefs.clear();
+
+  //Reset the antenna names to the defaults
+  prefs.putString("ant0", "Disconnect");
+  prefs.putString("ant1", "Antenna 1");
+  prefs.putString("ant2", "Antenna 2");
+  prefs.putString("ant3", "Antenna 3");
+  prefs.putString("ant4", "Antenna 4");
+  prefs.putString("ant5", "Antenna 5");
+  prefs.putString("ant6", "Antenna 6");
+
+  //Set the default anntenna connections
+  prefs.putInt("radio1", 1);
+  prefs.putInt("radio2", 2);
+
+  //Reset the display and knob colors
+  configureLCD(250, 133, 5, 5);
+  configureTwist(215, 117, 1);
+
+  //Reset the API key
+  getAPIKey(true);    //force the creation of a new API key
+
+  //Reset the splash screen
+  showSplash();
+  lcd.saveSplash(); //Save this current text as the splash screen at next power on
+  lcd.enableSplash(); //This will cause the splash to be displayed at power on
+  lcd.clear();
+}
+/******************************************************************************************/
 void loadAntennas() {
-  //Load the antenna names from eeprom
+/*
+Load the antenna names from eeprom
+*/
 
   // pull the descriptions from eeprom
   coaxDescriptions[1] = prefs.getString("ant1", "");
@@ -865,18 +950,21 @@ void loadAntennas() {
   coaxDescriptions[6] = prefs.getString("ant6", "");
 
   //Check for invalid settings - reset to default
-  if (coaxDescriptions[0].length() != 13) coaxDescriptions[0] = "Disconnect   ";
-  if (coaxDescriptions[1].length() != 13) coaxDescriptions[1] = "Antenna 1    ";
-  if (coaxDescriptions[2].length() != 13) coaxDescriptions[2] = "Antenna 2    ";
-  if (coaxDescriptions[3].length() != 13) coaxDescriptions[3] = "Antenna 3    ";
-  if (coaxDescriptions[4].length() != 13) coaxDescriptions[4] = "Antenna 4    ";
-  if (coaxDescriptions[5].length() != 13) coaxDescriptions[5] = "Antenna 5    ";
-  if (coaxDescriptions[6].length() != 13) coaxDescriptions[6] = "Antenna 6    ";
+  if (coaxDescriptions[0].length() > 13) coaxDescriptions[0] = "Disconnect";
+  if (coaxDescriptions[1].length() > 13) coaxDescriptions[1] = "Antenna 1";
+  if (coaxDescriptions[2].length() > 13) coaxDescriptions[2] = "Antenna 2";
+  if (coaxDescriptions[3].length() > 13) coaxDescriptions[3] = "Antenna 3";
+  if (coaxDescriptions[4].length() > 13) coaxDescriptions[4] = "Antenna 4";
+  if (coaxDescriptions[5].length() > 13) coaxDescriptions[5] = "Antenna 5";
+  if (coaxDescriptions[6].length() > 13) coaxDescriptions[6] = "Antenna 6";
 
 }
 /******************************************************************************************/
 /******************************************************************************************/
 void notFound(AsyncWebServerRequest *request) {
+/*
+Respond with a 404 File Not Found error.
+*/
     request->send(404, "text/plain", "Not found");
 }
 
@@ -889,7 +977,6 @@ void notFound(AsyncWebServerRequest *request) {
 /******************************************************************************************
                     Views
 ******************************************************************************************/
-/******************************************************************************************/
 String getHeader() {
 
   String html = R"(<!DOCTYPE html>
@@ -919,7 +1006,7 @@ String getHeader() {
     return html;
   }
 /******************************************************************************************/
-String getFooter() {
+String getFooter(String javascript) {
 
   String html = R"(
 <footer class="bg-dark text-white py-3 mt-5">
@@ -930,7 +1017,9 @@ String getFooter() {
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/main.js"></script>
-
+    <script type="text/javascript">
+%JAVASCRIPT%
+    </script>
 
     
 </body>
@@ -939,6 +1028,8 @@ String getFooter() {
 
 
   )"; 
+
+  html.replace("%JAVASCRIPT%", javascript);
 
   return html;
 }
@@ -953,23 +1044,23 @@ String getPageInterface() {
                 <div class="row">
                     <div class="col-md-6">
                         <h2 class="text-center">Radio 1</h2>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 1);" id="rad1ant1">%ANT1%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 2);" id="rad1ant2">%ANT2%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 3);" id="rad1ant3">%ANT3%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 4);" id="rad1ant4">%ANT4%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 5);" id="rad1ant5">%ANT5%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 6);" id="rad1ant6">%ANT6%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 0);" id="rad1ant0">%ANT0%</button>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 1);" id="rad1ant1">%ANT1%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 2);" id="rad1ant2">%ANT2%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 3);" id="rad1ant3">%ANT3%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 4);" id="rad1ant4">%ANT4%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 5);" id="rad1ant5">%ANT5%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 6);" id="rad1ant6">%ANT6%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(1, 0);" id="rad1ant0">%ANT0%</a>
                     </div>
                     <div class="col-md-6">
                         <h2 class="text-center">Radio 2</h2>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 1);" id="rad2ant1">%ANT1%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 2);" id="rad2ant2">%ANT2%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 3);" id="rad2ant3">%ANT3%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 4);" id="rad2ant4">%ANT4%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 5);" id="rad2ant5">%ANT5%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 6);" id="rad2ant6">%ANT6%</button>
-                        <button class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 0);" id="rad2ant0">%ANT0%</button>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 1);" id="rad2ant1">%ANT1%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 2);" id="rad2ant2">%ANT2%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 3);" id="rad2ant3">%ANT3%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 4);" id="rad2ant4">%ANT4%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 5);" id="rad2ant5">%ANT5%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 6);" id="rad2ant6">%ANT6%</a>
+                        <a class="btn btn-primary w-100 mb-2" onclick="connectAnt(2, 0);" id="rad2ant0">%ANT0%</a>
                     </div>
                 </div>
             </div>
@@ -987,9 +1078,14 @@ String getPageInterface() {
   html.replace("%ANT5%", coaxDescriptions[5]);
   html.replace("%ANT6%", coaxDescriptions[6]);
 
+  String js = R"(
+// Update the connected antenna every 500ms
+setInterval(tmrRefresh, 500);
+)";
+
   //Concat header, body, and footer
   String header = getHeader();
-  String footer = getFooter();
+  String footer = getFooter(js);
   html = header + html + footer;
 
   return html;
@@ -1083,6 +1179,12 @@ String getPageConfiguration() {
         </div>
       </div>
     </div>
+
+    <div class="row">
+      <div class="col-md-12">
+        <span class="text-center">Firmware Version: %FIRMWARE%</span>
+      </div>
+    </div>
     </main>    
   
   )";
@@ -1106,10 +1208,12 @@ String getPageConfiguration() {
   html.replace("%KNOBGREEN%", String(prefs.getInt("knobGreen")));
   html.replace("%KNOBBLUE%", String(prefs.getInt("knobBlue")));
 
+  html.replace("%FIRMWARE%", FIRMWARE_VERSION);
+
 
   //Concat header, body, and footer
   String header = getHeader();
-  String footer = getFooter();
+  String footer = getFooter("");
   html = header + html + footer;
 
   return html;
@@ -1137,7 +1241,7 @@ function saveAntennaNames() {
 async function setAntennaName(ant, name) {
 try {
     var uri = '/api/' + apiKey + '/set/antenna/' + ant.toString() + '/' + name;
-    console.log(uri);
+    //console.log(uri);
 
     const response = await fetch(uri, {
         method: 'POST'
@@ -1178,7 +1282,7 @@ async function setColor(destination, r, g, b, contrast) {
         if (destination == 'lcd') {
             uri += '/' + contrast.toString();
         }
-        console.log(uri);
+        //console.log(uri);
 
         const response = await fetch(uri, {
             method: 'POST'
@@ -1200,7 +1304,7 @@ async function connectAnt(radio, antenna) {
         
 
         var uri = '/api/' + apiKey + '/connect/' + radio.toString() + '/' + antenna.toString();
-        console.log(uri);
+        //console.log(uri);
 
         const response = await fetch(uri, {
             method: 'POST'
@@ -1222,30 +1326,25 @@ var refreshRadio = 1;
 async function tmrRefresh() {
   try {
   
-  
-  //alternate between the two radios
-  if (refreshRadio == 1) {
-    refreshRadio = 2;
-  } else {
-    refreshRadio = 1;
-  }
 
-  var uri = '/api/' + apiKey + '/get/radio/' + refreshRadio.toString();
-  console.log(uri);
+  var uri = '/api/' + apiKey + '/get/radio/0';
+  //console.log(uri);
 
         const response = await fetch(uri, {
             method: 'GET'
         });
 
         if (response.ok) {
-            const antenna = await response.text();
+            const antennas = await response.text();
 
-            console.log("Get Results: " + refreshRadio + " :: " + antenna);
+            console.log("Get Results: " + antennas);
+
+            var ants = antennas.split(":");
 
             //loop through all of the rad1ant buttons and set the class to btn-primary except for the one that is connected
             for (var i = 0; i < 7; i++) {
-                var button = document.getElementById('rad' + refreshRadio.toString() + 'ant' + i);
-                if (i == antenna) {
+                var button = document.getElementById('rad1ant' + i);
+                if (i == ants[0]) {
                     button.className = "btn btn-success w-100 mb-2";
                 } else {
                     if (i == 0) {
@@ -1254,9 +1353,25 @@ async function tmrRefresh() {
                         button.className = "btn btn-primary w-100 mb-2";
                     }
                 }
-            }            
+            }   
+
+            //loop through all of the rad1ant buttons and set the class to btn-primary except for the one that is connected
+            for (var i = 0; i < 7; i++) {
+                var button = document.getElementById('rad2ant' + i);
+                if (i == ants[1]) {
+                    button.className = "btn btn-success w-100 mb-2";
+                } else {
+                    if (i == 0) {
+                        button.className = "btn btn-secondary w-100 mb-2";
+                    } else {
+                        button.className = "btn btn-primary w-100 mb-2";
+                    }
+                }
+            }   
+
+
         } else {
-            alert('Error in API call.');
+            //alert('Error in API call.');
         }
 
 
@@ -1264,14 +1379,10 @@ async function tmrRefresh() {
     console.error(error);
   }
 }
-
-// Call the function every 1 seconds
-setInterval(tmrRefresh, 1000);
-
   )";
 
 
-  html.replace("%APIKEY%", getTempAPIKey());
+  html.replace("%APIKEY%", sessionAPIKey);
 
   return html;
 }
@@ -1281,7 +1392,7 @@ String getCSS() {
   String html = R"(
 
 body {
-    width: 80%;
+    width: 100%;
     height: 80%;
     margin: auto;
 }
