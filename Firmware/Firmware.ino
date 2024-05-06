@@ -40,6 +40,7 @@ const char* password = "";
 
 //Defines
 #define FIRMWARE_VERSION "1.0.1"
+#define PAGE_TITLE "W0ZC Coax Controller"
 
 #define DISPLAY_ADDRESS1 0x72 //This is the default address of the OpenLCD
 #define MAX_CONFIG_SCREENS 6
@@ -59,7 +60,6 @@ int radioSelected = 1;
 int displayMode = 1;    //1 = normal operation, 2 = configuration mode
 int configScreen = 0;     //The current configuration screen being displayed
 
-const String pageTitle = "Coax Controller";
 String sessionAPIKey = "";
 
 // Define the labels for the 6 antennas + Disconnect
@@ -82,6 +82,7 @@ bool checkAPIKey(String key);
 void saveAntennaName(int antenna, String name);
 void factoryReset();
 void loadAntennas();
+void displayConfiguration();
 
 void notFound(AsyncWebServerRequest *request);
 String getHeader();
@@ -168,11 +169,7 @@ void setup(void) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("");
-  Serial.print("Connected to ");
-  Serial.println(ssid);
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+
 
   //Load the antenna names from eeprom
   loadAntennas();
@@ -364,15 +361,15 @@ void setup(void) {
 
 
   server.begin();
-  Serial.println("HTTP server started");
 
  //Generate the temporary session API key - Note that this should happen after Wifi has been established.
   sessionAPIKey = generateKey();  
 
   //Get the API key. Generate a new one if necessary
   String apiKey = getAPIKey(false);   //Don't force the creation of a new key if one already exists
-  Serial.println("API Key: " + apiKey);
 
+  //Show the running configuration on the Serial port
+  displayConfiguration();
 }
 /******************************************************************************************/
 void loop(void) {
@@ -381,7 +378,6 @@ void loop(void) {
   static int pressCount = 0;
 
   if (twist.isPressed()) {
-    //Serial.println("isPressed!");
     pressCount++;
   }
 
@@ -960,13 +956,42 @@ Load the antenna names from eeprom
 
 }
 /******************************************************************************************/
-/******************************************************************************************/
-void notFound(AsyncWebServerRequest *request) {
+void displayConfiguration() {
 /*
-Respond with a 404 File Not Found error.
+Dumps all of the configuration information to the Serial port, including the API Key.
 */
-    request->send(404, "text/plain", "Not found");
+  Serial.println("");
+  Serial.println("");
+  Serial.println("");
+
+  Serial.println(PAGE_TITLE);
+  Serial.println("Firmware:     " + String(FIRMWARE_VERSION));
+  Serial.println("API Key:      " + getAPIKey(false));
+  Serial.println("");
+
+  Serial.println("Coax (none):  " + coaxDescriptions[0]);
+  Serial.println("Coax 1:       " + coaxDescriptions[1]);
+  Serial.println("Coax 2:       " + coaxDescriptions[2]);
+  Serial.println("Coax 3:       " + coaxDescriptions[3]);
+  Serial.println("Coax 4:       " + coaxDescriptions[4]);
+  Serial.println("Coax 5:       " + coaxDescriptions[5]);
+  Serial.println("Coax 6:       " + coaxDescriptions[6]);
+  Serial.println("");
+
+  Serial.println("Wifi SSID:    " + WiFi.SSID());
+  Serial.println("IP Address:   " + WiFi.localIP());
+  Serial.print("IP Mode:      ");
+  if (useStaticIP) {
+    Serial.println("Static");
+  } else {
+    Serial.println("DHCP");
+  }
+  // Serial.println("Gateway:      " + WiFi.gatewayIP());
+  // Serial.println("Subnet Mask:  " + WiFi.subnetMask());
+  // Serial.println("Primary DNS:  " + WiFi.dnsIP(0));
+  // Serial.println("Secondary DNS:" + WiFi.dnsIP(1));
 }
+/******************************************************************************************/
 
 
 
@@ -977,6 +1002,13 @@ Respond with a 404 File Not Found error.
 /******************************************************************************************
                     Views
 ******************************************************************************************/
+void notFound(AsyncWebServerRequest *request) {
+/*
+Respond with a 404 File Not Found error.
+*/
+    request->send(404, "text/plain", "Not found");
+}
+/******************************************************************************************/
 String getHeader() {
 
   String html = R"(<!DOCTYPE html>
@@ -984,7 +1016,7 @@ String getHeader() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>W0ZC Coax Selector</title>
+    <title>%TITLE%</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
 
@@ -995,7 +1027,7 @@ String getHeader() {
 <body>
     <header class="bg-primary text-white py-3">
         <div class="container d-flex justify-content-between align-items-center">
-            <h1 class="mb-0">W0ZC Coax Controller</h1>
+            <h1 class="mb-0">%TITLE%</h1>
             <a class="btn btn-light" href="/config">Configuration</a>
             <a class="btn btn-light" href="/">Control</a>
         </div>
@@ -1003,6 +1035,8 @@ String getHeader() {
 
 )"; 
   
+    html.replace("%TITLE%", PAGE_TITLE);
+
     return html;
   }
 /******************************************************************************************/
@@ -1011,7 +1045,7 @@ String getFooter(String javascript) {
   String html = R"(
 <footer class="bg-dark text-white py-3 mt-5">
         <div class="container">
-            <p class="mb-0">W0ZC Coax Selector</br /><a href="http://www.w0zc.com/" target="_blank">W0ZC.com</a></p>
+            <p class="mb-0">%TITLE%</br /><a href="http://www.w0zc.com/" target="_blank">W0ZC.com</a></p>
         </div>
     </footer>
 
@@ -1029,6 +1063,7 @@ String getFooter(String javascript) {
 
   )"; 
 
+  html.replace("%TITLE%", PAGE_TITLE);
   html.replace("%JAVASCRIPT%", javascript);
 
   return html;
@@ -1254,7 +1289,7 @@ try {
     }
 
 } catch (error) {
-    console.error(error);
+    console.log(error);
     //alert('An error occurred');
 }
 }
@@ -1294,7 +1329,7 @@ async function setColor(destination, r, g, b, contrast) {
             alert('Error in API call.');
         }
     } catch (error) {
-        console.error(error);
+        console.log(error);
         //alert('An error occurred');
     }
 }
@@ -1316,7 +1351,7 @@ async function connectAnt(radio, antenna) {
             alert('Error in API call.');
         }
     } catch (error) {
-        console.error(error);
+        console.log(error);
         //alert('An error occurred');
     }
 }
@@ -1376,7 +1411,7 @@ async function tmrRefresh() {
 
 
   } catch (error) {
-    console.error(error);
+    console.log(error);
   }
 }
   )";
