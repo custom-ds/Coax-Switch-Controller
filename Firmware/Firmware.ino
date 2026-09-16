@@ -30,6 +30,10 @@
 
 #include <Preferences.h>
 
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
 
 /*
  * Wifi credentials are stored in config.h file. See the template.
@@ -52,6 +56,12 @@ TWIST twist;
 
 Preferences prefs;
 AsyncWebServer server(80);
+
+// Guards all access to the I2C bus (lcd + twist). loop() and the AsyncWebServer route
+// handlers run in different tasks and both touch Wire/lcd/twist; without this mutex they
+// can collide mid-transaction and wedge the I2C bus, which under heavy network load
+// (more frequent async callback scheduling) shows up as a hang -> watchdog reset.
+SemaphoreHandle_t i2cMutex;
 
 int radio1 = 0;   //default both to disconnected
 int radio2 = 0;   //default both to disconnected
@@ -84,6 +94,8 @@ void factoryReset();
 void loadAntennas();
 void displayConfiguration();
 
+void printResetReason();
+
 void notFound(AsyncWebServerRequest *request);
 String getHeader();
 String getFooter(String javascript);
@@ -101,6 +113,11 @@ String getCSS();
 void setup(void) {
   Serial.begin(115200);
 
+  //Log why the last reset happened. If the device is rebooting unexpectedly, this tells us
+  //whether it's a watchdog, brownout, panic, etc. instead of having to guess.
+  printResetReason();
+
+  i2cMutex = xSemaphoreCreateMutex();
 
   //Configure the digital I/O pins
   pinMode(13, OUTPUT);
@@ -170,6 +187,12 @@ void setup(void) {
     Serial.print(".");
   }
 
+  //Disable WiFi modem sleep. Power-save timing tends to interact badly with AsyncTCP when the
+  //channel is busy (e.g. heavy traffic from other devices on the same network), which is a
+  //common cause of ESP32 hangs/resets under network load even when traffic isn't addressed
+  //to this device.
+  WiFi.setSleep(false);
+
 
   //Load the antenna names from eeprom
   loadAntennas();
@@ -196,7 +219,11 @@ void setup(void) {
 
     if (checkAPIKey(apiKey) && radioID >= 1 && radioID <= 2 && antennaID >=0 && antennaID <=6) {
 
+      //connectAntenna() touches the I2C-driven LCD; take the same lock loop() uses so this
+      //can't interleave with a knob-driven display update on the other task.
+      xSemaphoreTake(i2cMutex, portMAX_DELAY);
       connectAntenna(radioID, antennaID, true);
+      xSemaphoreGive(i2cMutex);
       request->send(200, "text/plain", "Radio " + radio + " connected to antenna " + antenna);
     } else {
       request->send(400, "text/plain", "API Request Denied. Valid key?");
@@ -220,7 +247,9 @@ void setup(void) {
     } 
 
     if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+      xSemaphoreTake(i2cMutex, portMAX_DELAY);
       configureTwist(r, g, b);
+      xSemaphoreGive(i2cMutex);
       request->send(200, "text/plain", "Twist Knob configured");
     } else {
       request->send(400, "text/plain", "Invalid RGB values");
@@ -247,8 +276,10 @@ void setup(void) {
     } 
 
     if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255 && contrast >= 0 && contrast <= 255) {
+      xSemaphoreTake(i2cMutex, portMAX_DELAY);
       configureLCD(r, g, b, contrast);
       updateLCD();    //return to whatever screen we were on.
+      xSemaphoreGive(i2cMutex);
       request->send(200, "text/plain", "LCD configured");
     } else {
       request->send(400, "text/plain", "Invalid RGB values");
@@ -279,7 +310,9 @@ void setup(void) {
     if (antennaID >= 0 && antennaID <= 6) {
       saveAntennaName(antennaID, name);
       loadAntennas();   //populate the array of antenna names
+      xSemaphoreTake(i2cMutex, portMAX_DELAY);
       updateLCD();    //update the LCD display with the new name
+      xSemaphoreGive(i2cMutex);
       request->send(200, "text/plain", "Antenna " + antenna + " name saved");
     } else {
       request->send(400, "text/plain", "Invalid antenna number");
@@ -373,9 +406,13 @@ void setup(void) {
 }
 /******************************************************************************************/
 void loop(void) {
-  
+
   int diff;
   static int pressCount = 0;
+
+  //Hold the I2C bus for the whole knob-read + display-update cycle so an AsyncWebServer
+  //route handler can't interleave a Wire transaction with this one (see i2cMutex comment above).
+  xSemaphoreTake(i2cMutex, portMAX_DELAY);
 
   if (twist.isPressed()) {
     pressCount++;
@@ -418,9 +455,10 @@ void loop(void) {
       updateConfigScreen(diff);
     }
 
-    
+
   }
-  
+
+  xSemaphoreGive(i2cMutex);
 
   delay(100);
 }
@@ -618,6 +656,13 @@ Connect the 'antenna' to the 'radio'. If incrOnCollision is true, then the anten
 there is a collision, otherwise it is decremented.
 */
 
+  //Remember the prior selection so we only hit flash (Preferences/NVS) below when it actually
+  //changes. connectAntenna() is called on every knob detent, and NVS writes briefly stall both
+  //cores (flash cache disable) - writing on every tick regardless of change adds unnecessary
+  //flash wear and timing pressure, especially under heavy WiFi/network load.
+  int prevRadio1 = radio1;
+  int prevRadio2 = radio2;
+
   if (radio == 1) {
     radio1 = antenna;
   }
@@ -702,10 +747,12 @@ there is a collision, otherwise it is decremented.
       break;
     }
 
-    //Save the current antenna selection to eeprom
-    prefs.putInt("radio1", radio1);
-  } 
-  
+    //Save the current antenna selection to eeprom, but only if it actually changed
+    if (radio1 != prevRadio1) {
+      prefs.putInt("radio1", radio1);
+    }
+  }
+
   if (radio == 2) {
 
 
@@ -750,8 +797,10 @@ there is a collision, otherwise it is decremented.
 
 
 
-    //Save the current antenna selection to eeprom
-    prefs.putInt("radio2", radio2);
+    //Save the current antenna selection to eeprom, but only if it actually changed
+    if (radio2 != prevRadio2) {
+      prefs.putInt("radio2", radio2);
+    }
   }
   digitalWrite(13, HIGH);
 
@@ -990,6 +1039,29 @@ Dumps all of the configuration information to the Serial port, including the API
   // Serial.println("Subnet Mask:  " + WiFi.subnetMask());
   // Serial.println("Primary DNS:  " + WiFi.dnsIP(0));
   // Serial.println("Secondary DNS:" + WiFi.dnsIP(1));
+}
+/******************************************************************************************/
+void printResetReason() {
+/*
+Prints why the chip last reset (power-on, watchdog, brownout, panic, etc.) to the Serial port.
+If the device is rebooting unexpectedly in the field, capturing this at the next boot tells us
+which subsystem to look at instead of guessing.
+*/
+  String reason;
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   reason = "Power-on reset"; break;
+    case ESP_RST_EXT:       reason = "External pin reset"; break;
+    case ESP_RST_SW:        reason = "Software reset (esp_restart)"; break;
+    case ESP_RST_PANIC:     reason = "Software panic / exception (crash)"; break;
+    case ESP_RST_INT_WDT:   reason = "Interrupt watchdog (a task held interrupts/a critical section too long)"; break;
+    case ESP_RST_TASK_WDT:  reason = "Task watchdog (a task didn't yield/finish in time)"; break;
+    case ESP_RST_WDT:       reason = "Other watchdog"; break;
+    case ESP_RST_DEEPSLEEP: reason = "Woke from deep sleep"; break;
+    case ESP_RST_BROWNOUT:  reason = "Brownout (supply voltage dropped too low)"; break;
+    case ESP_RST_SDIO:      reason = "SDIO reset"; break;
+    default:                reason = "Unknown"; break;
+  }
+  Serial.println("Reset reason: " + reason);
 }
 /******************************************************************************************/
 
