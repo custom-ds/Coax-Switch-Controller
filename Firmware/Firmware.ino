@@ -43,7 +43,7 @@ const char* password = "";
 */
 
 //Defines
-#define FIRMWARE_VERSION "1.0.1"
+#define FIRMWARE_VERSION "1.1.0"
 #define PAGE_TITLE "W0ZC Coax Controller"
 
 #define DISPLAY_ADDRESS1 0x72 //This is the default address of the OpenLCD
