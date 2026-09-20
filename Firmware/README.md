@@ -19,6 +19,18 @@ platform, start by installing the board support tools.
 In the Boards Manager section of Arduino IDE, search for the esp32 by Espressif Systems boards, and click the Install 
 button.
 
+**Important: install a 2.0.x release (2.0.17 is a good choice) of the esp32 board package, not 3.x.** The AsyncTCP/
+ESPAsyncWebSrv libraries below are older forks that don't implement the lwIP TCPIP-core locking that Espressif's 3.x
+board package (based on ESP-IDF v5.x) requires. Flashing this firmware with a 3.x board package installed will cause
+the board to reboot in a loop with a crash like:
+
+```
+assert failed: tcp_alloc /IDF/components/lwip/lwip/src/core/tcp.c:1854 (Required to lock TCPIP core functionality!)
+```
+
+If you hit that, open Tools > Board > Boards Manager, install a 2.0.x version of "esp32 by Espressif Systems", select
+it, restart the IDE, and re-upload.
+
 There are some libraries that are required. Go to Tools and Manage Libraries. In the Search box, find and install these
 libraries:
 

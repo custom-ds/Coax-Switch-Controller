@@ -1,5 +1,7 @@
 /* Coax Switch uses: Sparkfun ESP32 Thing Plus C */
 
+// CAUTION: If the board reboots in a constant loop after flashing, see the README - it's very likely an
+// esp32 board package version mismatch (needs 2.0.x), not a bug in this sketch.
 
 // Add buildflag ASYNCWEBSERVER_REGEX to enable the regex support
 
